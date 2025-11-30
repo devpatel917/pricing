@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tail Risk Simulator - Clean & Readable</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  body { font-family: Arial; background:#f0f2f5; color:#333; padding:15px; text-align:center;}
+  h1{font-size:1.8em;margin-bottom:10px;}
+  h2{font-size:1.3em;margin-top:20px;}
+  .controls{margin-bottom:20px;}
+  button{padding:8px 14px;margin:5px;background:#007bff;border:none;border-radius:5px;color:white;cursor:pointer;font-size:0.95em;}
+  button:hover{background:#0056b3;}
+  canvas{background:white;border-radius:8px;margin:15px auto;display:block;width:800px !important;height:350px !important;}
+</style>
+</head>
+<body>
+
+<h1>Tail Risk Simulator - Clean & Readable</h1>
+<div class="controls">
+  <button onclick="runScenario('base')">Base</button>
+  <button onclick="runScenario('tail')">Tail ↑</button>
+  <button onclick="runScenario('freq')">Freq ↑</button>
+  <button onclick="runScenario('catastrophe')">Catastrophe</button>
+  <button onclick="runScenario('combined')">Combined</button>
+</div>
+
+<h2>Claim Histogram</h2>
+<canvas id="histChart"></canvas>
+
+<h2>Cumulative Loss</h2>
+<canvas id="cumChart"></canvas>
+
+<h2>Tail Risk</h2>
+<canvas id="riskChart"></canvas>
+
+<script>
+// claim generator
+function generateClaims(n, mu, sigma, tailMultiplier, tailProb=0.01, cluster=false){
+  const claims=[];
+  for(let i=0;i<n;i++){
+    let u=Math.random();
+    let z=Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*Math.random());
+    let claim=Math.exp(mu + sigma*z);
+    if(Math.random()<tailProb) claim*=tailMultiplier;
+    claims.push(claim);
+  }
+  if(cluster){ for(let i=0;i<3;i++){ claims.push(Math.max(...claims)*tailMultiplier); } }
+  return claims;
+}
+
+// VaR and ES
+function calculateVaR_ES(data, alpha=0.95){
+  const sorted=[...data].sort((a,b)=>a-b);
+  const idx=Math.floor(alpha*sorted.length);
+  const VaR=sorted[idx];
+  const ES=sorted.slice(idx).reduce((a,b)=>a+b,0)/(sorted.length-idx);
+  return {VaR,ES};
+}
+
+// format numbers
+function formatNumber(x){ return x.toLocaleString(); }
+
+// charts
+let histChart, cumChart, riskChart;
+
+function runScenario(type){
+  let n=2000, mu=10, sigma=1, tailMultiplier=3, cluster=false;
+  switch(type){
+    case 'tail': tailMultiplier=5; break;
+    case 'freq': n=3000; break;
+    case 'catastrophe': cluster=true; break;
+    case 'combined': n=3000; tailMultiplier=5; cluster=true; break;
+  }
+
+  const claims=generateClaims(n, mu, sigma, tailMultiplier, 0.01, cluster);
+
+  // histogram - 15 bins
+  const bins=15;
+  const maxVal=Math.max(...claims);
+  const binWidth=maxVal/bins;
+  const histogram=new Array(bins).fill(0);
+  claims.forEach(c=>{ histogram[Math.min(Math.floor(c/binWidth), bins-1)]++; });
+  let labels=Array.from({length:bins},(_,i)=>`$${formatNumber((i*binWidth).toFixed(0))}-${formatNumber(((i+1)*binWidth).toFixed(0))}`);
+  // show only every 2nd label
+  const displayLabels = labels.map((l,i)=> i%2===0 ? l : '');
+
+  // cumulative loss - sample every 20th
+  const sortedClaims=[...claims].sort((a,b)=>a-b);
+  const sampledClaims=sortedClaims.filter((_,i)=>i%20===0);
+  const cumLoss=sampledClaims.reduce((acc,c,i)=>{ acc.push((acc[i-1]||0)+c); return acc; },[]);
+
+  const {VaR, ES}=calculateVaR_ES(claims);
+
+  // Histogram
+  if(histChart) histChart.destroy();
+  histChart=new Chart(document.getElementById('histChart'),{
+    type:'bar',
+    data:{labels:displayLabels,datasets:[{label:'Count',data:histogram,backgroundColor:'#007bff'}]},
+    options:{
+      plugins:{title:{display:true,text:`Claim Histogram (${type})`}},
+      responsive:true, maintainAspectRatio:false,
+      scales:{
+        x:{ ticks:{ font:{size:14}, maxRotation:45, minRotation:30 } },
+        y:{ ticks:{ font:{size:14} } }
+      }
+    }
+  });
+
+  // Cumulative Loss
+  if(cumChart) cumChart.destroy();
+  cumChart=new Chart(document.getElementById('cumChart'),{
+    type:'line',
+    data:{labels:sampledClaims.map((v,i)=>i+1), datasets:[{label:'Cumulative Loss',data:cumLoss,borderColor:'#28a745',fill:false}]},
+    options:{
+      plugins:{title:{display:true,text:`Cumulative Loss (${type})`}},
+      responsive:true, maintainAspectRatio:false,
+      scales:{
+        x:{ ticks:{ font:{size:14}, maxTicksLimit:10 } },
+        y:{ ticks:{ font:{size:14}, callback: val=>formatNumber(val) } }
+      }
+    }
+  });
+
+  // Tail Risk
+  if(riskChart) riskChart.destroy();
+  riskChart=new Chart(document.getElementById('riskChart'),{
+    type:'bar',
+    data:{labels:['95% VaR','Expected Shortfall'], datasets:[{label:'Value ($)',data:[VaR,ES],backgroundColor:['#ffc107','#dc3545']}]},
+    options:{
+      plugins:{title:{display:true,text:`Tail Risk (${type})`}},
+      responsive:true, maintainAspectRatio:false,
+      scales:{y:{ ticks:{ font:{size:14}, callback: val=>formatNumber(val) } }}
+    }
+  });
+}
+
+// initial load
+runScenario('base');
+</script>
+
+</body>
+</html>

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Specialty Insurance Premium Simulator (with Credibility Fix)</title>
+
+<style>
+  body { font-family: Arial, sans-serif; margin: 20px; background: #f4f4f9; color: #333; }
+  h1 { text-align: center; color: #2c3e50; }
+  .container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 0 15px rgba(0,0,0,0.1); }
+  .input-block { margin: 15px 0; }
+  label { font-weight: bold; display: block; margin-bottom: 5px; }
+  input[type="text"], input[type="number"], input[type="range"], select {
+    width: 100%; padding: 8px; margin-top: 4px;
+  }
+  .result { margin-top: 20px; text-align: center; font-size: 1.5em; font-weight: bold; }
+  .breakdown { margin-top: 15px; background: #eef; padding: 15px; border-radius: 10px; }
+</style>
+</head>
+
+<body>
+<h1>Specialty Insurance Premium Simulator</h1>
+
+<div class="container">
+
+  <!-- HISTORICAL LOSSES -->
+  <div class="input-block">
+    <label for="historicalLosses">Enter Historical Losses ($k, comma-separated):</label>
+    <input type="text" id="historicalLosses" placeholder="e.g., 400, 500, 600, 550">
+  </div>
+
+  <!-- FORECAST YEARS -->
+  <div class="input-block">
+    <label for="forecastYears">Forecast Horizon (years): <span id="forecastYearsValue">1</span></label>
+    <input type="range" id="forecastYears" min="1" max="5" step="1" value="1">
+  </div>
+
+  <!-- INDUSTRY EXPECTED LOSS -->
+  <div class="input-block">
+    <label for="industryLoss">Industry Expected Loss ($k):</label>
+    <input type="number" id="industryLoss" value="600">
+  </div>
+
+  <!-- INDUSTRY TYPE -->
+  <div class="input-block">
+    <label for="industry">Industry Factor:</label>
+    <select id="industry">
+      <option value="1.0">Tech (baseline)</option>
+      <option value="1.2">Construction</option>
+      <option value="1.5">Healthcare</option>
+      <option value="1.1">Retail</option>
+      <option value="1.3">Finance</option>
+    </select>
+  </div>
+
+  <!-- FLOOD RISK -->
+  <div class="input-block">
+    <label for="flood">Flood/Demographic Risk:</label>
+    <select id="flood">
+      <option value="1.0">Low</option>
+      <option value="1.3">Medium</option>
+      <option value="1.6">High</option>
+    </select>
+  </div>
+
+  <!-- CREDIBILITY -->
+  <div class="input-block">
+    <label for="credibility">Credibility (Z): <span id="credibilityValue">0.5</span></label>
+    <input type="range" id="credibility" min="0" max="1" step="0.05" value="0.5">
+  </div>
+
+  <!-- OTHER ADJUSTMENT -->
+  <div class="input-block">
+    <label for="otherAdj">Other Specialty Adjustment (%): <span id="otherAdjValue">0</span></label>
+    <input type="range" id="otherAdj" min="-50" max="50" step="1" value="0">
+  </div>
+
+  <!-- RESULT -->
+  <div class="result">
+    FINAL PREMIUM (Annual): $<span id="premium">0</span>k
+  </div>
+
+  <!-- BREAKDOWN -->
+  <div class="breakdown" id="breakdown"></div>
+
+</div>
+
+
+<script>
+/* -------------- HELPERS ----------------- */
+function parseHistoricalLosses() {
+  let raw = document.getElementById("historicalLosses").value.trim();
+  if (!raw) return [];
+  return raw.split(",")
+            .map(x => parseFloat(x.trim()))
+            .filter(x => !isNaN(x));
+}
+
+function forecastLosses(hist, years) {
+  if (hist.length === 0) return 500; // fallback default
+
+  const n = hist.length;
+  const avg = hist.reduce((a,b) => a+b, 0) / n;
+  const growth = (hist[n-1] - hist[0]) / Math.max(n-1, 1);
+
+  const forecast = avg + years * growth;
+  return Math.max(forecast, 0);
+}
+
+/* -------------- MAIN CALC ----------------- */
+function calculatePremium() {
+
+  const hist = parseHistoricalLosses();
+  const years = parseInt(document.getElementById("forecastYears").value);
+  const industryLoss = parseFloat(document.getElementById("industryLoss").value);
+
+  const Z = parseFloat(document.getElementById("credibility").value);
+  const industryFactor = parseFloat(document.getElementById("industry").value);
+  const floodFactor = parseFloat(document.getElementById("flood").value);
+  const otherAdj = parseFloat(document.getElementById("otherAdj").value) / 100;
+
+  const clientProj = forecastLosses(hist, years);
+
+  // --- Correct Credibility Formula ---
+  const blendedLoss = Z * clientProj + (1 - Z) * industryLoss;
+
+  const premiumBase = blendedLoss * industryFactor * floodFactor;
+  const finalPremium = premiumBase * (1 + otherAdj);
+
+  // Display
+  document.getElementById("premium").innerText = finalPremium.toFixed(2);
+
+  document.getElementById("breakdown").innerHTML = `
+    <p><b>Projected Client Loss (next ${years} yr):</b> $${clientProj.toFixed(2)}k</p>
+    <p><b>Industry Expected Loss:</b> $${industryLoss}k</p>
+    <p><b>Blended Loss (Credibility Applied):</b> $${blendedLoss.toFixed(2)}k</p>
+    <p><b>Industry Factor:</b> x${industryFactor}</p>
+    <p><b>Flood/Demo Factor:</b> x${floodFactor}</p>
+    <p><b>Other Adjustment:</b> ${(otherAdj*100).toFixed(0)}%</p>
+  `;
+}
+
+/* -------------- EVENT LISTENERS ----------------- */
+document.getElementById("historicalLosses").addEventListener("input", calculatePremium);
+document.getElementById("forecastYears").addEventListener("input", () => {
+  document.getElementById("forecastYearsValue").innerText = document.getElementById("forecastYears").value;
+  calculatePremium();
+});
+document.getElementById("industryLoss").addEventListener("input", calculatePremium);
+document.getElementById("industry").addEventListener("change", calculatePremium);
+document.getElementById("flood").addEventListener("change", calculatePremium);
+document.getElementById("credibility").addEventListener("input", () => {
+  document.getElementById("credibilityValue").innerText = document.getElementById("credibility").value;
+  calculatePremium();
+});
+document.getElementById("otherAdj").addEventListener("input", () => {
+  document.getElementById("otherAdjValue").innerText = document.getElementById("otherAdj").value;
+  calculatePremium();
+});
+
+// initial load
+calculatePremium();
+
+</script>
+</body>
+</html>

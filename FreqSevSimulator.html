@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Specialty Line Frequency-Severity Simulator with CI</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body { font-family: Arial; background:#f0f2f5; color:#333; padding:20px; text-align:center;}
+h1{font-size:1.8em;margin-bottom:10px;}
+h2{font-size:1.3em;margin-top:20px;}
+.controls{margin:20px 0; display:flex; justify-content:center; gap:20px; flex-wrap: wrap;}
+.control-group{display:flex; flex-direction:column; align-items:center;}
+input[type=range]{width:180px;}
+label{margin-top:5px; font-size:0.95em;}
+canvas{background:white;border-radius:8px;margin:15px auto; display:block; width:800px!important; height:350px!important;}
+.writeup{margin-top:30px; max-width:800px; text-align:left; background:#fff; padding:15px; border-radius:8px; box-shadow:0 0 5px rgba(0,0,0,0.1);}
+</style>
+</head>
+<body>
+
+<h1>Specialty Line Frequency-Severity Simulator</h1>
+
+<div class="controls">
+  <div class="control-group">
+    <label>Expected Frequency: <span id="freqVal">50</span></label>
+    <input type="range" min="10" max="200" step="5" value="50" id="freqSlider">
+  </div>
+  <div class="control-group">
+    <label>Severity Mean: <span id="sevVal">100000</span></label>
+    <input type="range" min="50000" max="500000" step="5000" value="100000" id="sevSlider">
+  </div>
+  <div class="control-group">
+    <label>Severity SD: <span id="sdVal">20000</span></label>
+    <input type="range" min="5000" max="100000" step="5000" value="20000" id="sdSlider">
+  </div>
+  <div class="control-group">
+    <label>Credibility: <span id="credVal">0.7</span></label>
+    <input type="range" min="0" max="1" step="0.01" value="0.7" id="credSlider">
+  </div>
+</div>
+
+<h2>Loss Distribution</h2>
+<canvas id="lossChart"></canvas>
+
+<h2>Cumulative Projected Loss with 95% CI</h2>
+<canvas id="cumChart"></canvas>
+
+<script>
+// ---------- Utilities ----------
+function formatNumber(x){ return x.toLocaleString(); }
+function randomNormal(mu, sigma){ // Box-Muller
+  let u=Math.random(), v=Math.random();
+  return mu + sigma*Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+}
+
+// ---------- Simulator ----------
+let lossChart, cumChart;
+
+function runSimulation(){
+  const freq = parseInt(document.getElementById('freqSlider').value);
+  const mean = parseFloat(document.getElementById('sevSlider').value);
+  const sd = parseFloat(document.getElementById('sdSlider').value);
+  const cred = parseFloat(document.getElementById('credSlider').value);
+
+  document.getElementById('freqVal').innerText=freq;
+  document.getElementById('sevVal').innerText=formatNumber(mean);
+  document.getElementById('sdVal').innerText=formatNumber(sd);
+  document.getElementById('credVal').innerText=cred.toFixed(2);
+
+  // Simulate losses
+  const losses=[];
+  for(let i=0;i<freq;i++){
+    losses.push(Math.max(0, randomNormal(mean, sd)));
+  }
+
+  // Histogram data
+  const bins=20;
+  const maxLoss=Math.max(...losses);
+  const binWidth=maxLoss/bins;
+  const histData=new Array(bins).fill(0);
+  losses.forEach(l=>{ histData[Math.min(Math.floor(l/binWidth), bins-1)]++; });
+  const labels=Array.from({length:bins},(_,i)=>`$${formatNumber(Math.round(i*binWidth))}-${formatNumber(Math.round((i+1)*binWidth))}`);
+
+  // Cumulative loss with CI
+  const sorted=[...losses].sort((a,b)=>a-b);
+  const cumulative=[];
+  const lower=[], upper=[];
+  let cumSum=0;
+  for(let i=0;i<sorted.length;i++){
+    cumSum+=sorted[i];
+    cumulative.push(cumSum);
+    // CI: assume normal approx: CI width decreases with credibility
+    let se=Math.sqrt(i+1)*sd*(1-cred);
+    lower.push(cumSum - 1.96*se);
+    upper.push(cumSum + 1.96*se);
+  }
+
+  // Loss Histogram Chart
+  if(lossChart) lossChart.destroy();
+  lossChart=new Chart(document.getElementById('lossChart'),{
+    type:'bar',
+    data:{
+      labels:labels.map((l,i)=> i%2===0? l : ''), // condense labels
+      datasets:[{label:'Number of Losses', data:histData, backgroundColor:'#007bff'}]
+    },
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      plugins:{title:{display:true,text:'Simulated Loss Distribution'}},
+      scales:{y:{ticks:{font:{size:14}}}, x:{ticks:{font:{size:14}, maxRotation:45, minRotation:30}}}
+    }
+  });
+
+  // Cumulative Loss with CI Chart
+  if(cumChart) cumChart.destroy();
+  cumChart=new Chart(document.getElementById('cumChart'),{
+    type:'line',
+    data:{
+      labels:sorted.map((_,i)=>i+1),
+      datasets:[
+        {label:'Cumulative Loss', data:cumulative, borderColor:'#28a745', fill:false, tension:0.2},
+        {label:'95% CI Lower', data:lower, borderColor:'#ff0000', borderDash:[5,5], fill:false},
+        {label:'95% CI Upper', data:upper, borderColor:'#ff0000', borderDash:[5,5], fill:false}
+      ]
+    },
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      plugins:{title:{display:true,text:'Cumulative Projected Loss with 95% CI'}},
+      scales:{y:{ticks:{font:{size:14}, callback: val=>formatNumber(val)}}}
+    }
+  });
+}
+
+// Initial run
+runSimulation();
+
+// Event listeners
+['freqSlider','sevSlider','sdSlider','credSlider'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', runSimulation);
+});
+</script>
+
+<div class="writeup">
+<h2>Assumptions and Notes:</h2>
+<ul>
+<li>Specialty line: simulated D&O or Cyber dataset.</li>
+<li>Frequency and severity modeled using normal approximation for demonstration.</li>
+<li>Confidence interval (95%) incorporates **credibility adjustment** to account for limited data.</li>
+<li>Large-loss events and extreme tails not explicitly modeled, but can be added in future enhancements.</li>
+<li>Industry data and trend factors assumed from public specialty insurance reports (mock values for demo).</li>
+<li>Interactive sliders allow testing sensitivity to frequency, severity, and credibility.</li>
+</ul>
+</div>
+
+</body>
+</html>
